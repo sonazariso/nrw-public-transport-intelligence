@@ -1,363 +1,736 @@
 # Data Warehouse Design
 
-## 1. Design Goal
+## 1. Overview
 
-The data warehouse is designed to support analytical reporting for public transport performance in North Rhine-Westphalia (NRW).
+The Phase 1 data warehouse is designed as a Star Schema for scheduled regional rail analysis in North Rhine-Westphalia.
 
-The model follows a dimensional star-schema approach and is intended to support Power BI reporting with clear relationships, reusable dimensions, and scalable fact tables.
-
-The first implementation focuses on scheduled regional rail services:
+The implemented warehouse focuses on:
 
 - RE
 - RB
 - S-Bahn
 
-Future phases may extend the model to:
+The current warehouse contains scheduled timetable data only.
 
-- U-Bahn / Stadtbahn
-- Tram
-- Bus
+It does not yet contain actual operational events such as delays, cancellations, or actual arrival/departure times.
 
-## 2. Fact Table Grain
+---
 
-The most important design decision is the grain of the main fact table.
+## 2. Star Schema
 
-The selected grain is:
+### Status: Implemented
 
-**One scheduled trip at one stop on one service date.**
+The implemented warehouse model is:
+
+```text
+                 +-------------+
+                 | dw.DimDate  |
+                 +-------------+
+                       |
+                       |
++-------------+  +------------------+  +-------------+
+| dw.DimRoute |--| dw.FactTripStop |--| dw.DimStop  |
++-------------+  +------------------+  +-------------+
+```
+
+The fact table is the central analytical table.
+
+The dimensions provide descriptive context for:
+
+- date
+- route
+- operator
+- stop
+- station
+
+---
+
+## 3. Fact Table Grain
+
+### Status: Implemented
+
+The fact table grain is:
+
+```text
+One row = one scheduled TripInstance at one StopSequence
+```
+
+This means that each row represents one scheduled stop event within one concrete trip instance.
 
 Example:
 
-A train operating as a specific Trip on 2026-07-15 and stopping at Köln Hbf creates one fact row for that stop.
-
-If the same Trip stops at Düsseldorf Hbf, that creates another fact row.
-
-If the same scheduled service operates on another day, new fact rows are created for that service date.
-
-This grain provides enough detail for future analysis of:
-
-- planned arrival and departure
-- actual arrival and departure
-- delay
-- cancellation
-- route performance
-- station performance
-- time-of-day performance
-- delay propagation along a trip
-
-## 3. Main Fact Table
-
-The planned main fact table is:
-
-`dw.FactTripStop`
-
-Possible columns include:
-
-- FactTripStopKey
-- DateKey
-- TripKey
-- RouteKey
-- StopKey
-- OperatorKey
-- TransportModeKey
-- StopSequence
-- PlannedArrivalTime
-- PlannedDepartureTime
-- ActualArrivalTime
-- ActualDepartureTime
-- ArrivalDelaySeconds
-- DepartureDelaySeconds
-- IsCancelled
-- IsOnTime
-- IsSeverelyDelayed
-
-Actual operational columns will remain NULL until realtime or historical actual-performance data is integrated.
-
-## 4. Date Dimension
-
-Planned table:
-
-`dw.DimDate`
-
-The Date dimension will support filtering and trend analysis.
-
-Typical attributes:
-
-- DateKey
-- FullDate
-- Year
-- Quarter
-- Month
-- MonthName
-- WeekOfYear
-- DayOfMonth
-- DayOfWeek
-- DayName
-- IsWeekend
-
-Additional NRW-specific attributes may later include:
-
-- PublicHoliday
-- SchoolHoliday
-- HolidayName
-
-## 5. Time Dimension
-
-Planned table:
-
-`dw.DimTime`
-
-The Time dimension can support analysis by:
-
-- hour
-- minute
-- time period
-- morning peak
-- evening peak
-- off-peak period
-
-Possible attributes:
-
-- TimeKey
-- Hour
-- Minute
-- TimeLabel
-- TimePeriod
-- IsPeakHour
-
-## 6. Route Dimension
-
-Planned table:
-
-`dw.DimRoute`
-
-The Route dimension will represent transport lines.
-
-Possible attributes:
-
-- RouteKey
-- RouteId
-- RouteShortName
-- RouteLongName
-- RouteType
-- RouteColor
-- TransportMode
-- OperatorName
-
-Examples:
-
-- RE 1
-- RB 48
-- S 11
-
-The source GTFS `route_type` is not sufficient on its own to distinguish all business-relevant route categories, so additional classification logic will be introduced.
-
-## 7. Trip Dimension
-
-Planned table:
-
-`dw.DimTrip`
-
-The Trip dimension represents an individual scheduled journey definition.
-
-Possible attributes:
-
-- TripKey
-- TripId
-- RouteKey
-- ServiceId
-- TripHeadsign
-- TripShortName
-- DirectionId
-- ShapeId
-
-This dimension allows multiple fact rows belonging to the same Trip to be analyzed together.
-
-## 8. Stop Dimension
-
-Planned table:
-
-`dw.DimStop`
-
-Possible attributes:
-
-- StopKey
-- StopId
-- StopName
-- Latitude
-- Longitude
-- LocationType
-- ParentStation
-- PlatformCode
-- NvbwHstDhid
-
-A later transformation step may distinguish:
-
-- station
-- platform
-- stop position
-
-This is important because GTFS may contain multiple stop records belonging to the same physical station.
-
-## 9. Operator Dimension
-
-Planned table:
-
-`dw.DimOperator`
-
-Possible attributes:
-
-- OperatorKey
-- SourceAgencyId
-- OperatorName
-- OperatorGroup
-- TransportRegion
-
-The source `agency.txt` data does not always represent a clean one-to-one business definition of operator.
-
-For this reason, operator normalization will be performed in the working layer.
-
-## 10. Transport Mode Dimension
-
-Planned table:
-
-`dw.DimTransportMode`
-
-Possible values include:
-
-- RE
-- RB
-- S-Bahn
-- U-Bahn / Stadtbahn
-- Tram
-- Bus
-
-Phase 1 will primarily use:
-
-- RE
-- RB
-- S-Bahn
-
-This dimension provides a business-friendly classification independent of raw GTFS route types.
-
-## 11. Service Date Generation
-
-GTFS does not directly contain one row for every active Trip date.
-
-Instead, service availability is derived from:
-
-- `calendar.txt`
-- `calendar_dates.txt`
-
-The warehouse therefore needs to generate actual service dates before loading the fact table.
-
-Planned transformation:
-
-`calendar + calendar_dates → wrk.ServiceDates`
-
-This process must:
-
-- expand weekday rules
-- respect start and end dates
-- add exception dates
-- remove excluded dates
-
-The result will represent the actual dates on which each `service_id` is active.
-
-## 12. GTFS Time Handling
-
-An important technical design decision concerns GTFS time values.
-
-GTFS permits times greater than `24:00:00`.
-
-For example:
-
-`25:15:00`
-
-This represents 01:15 on the following service day.
-
-Because this value is not valid for the SQL Server `TIME` data type, raw GTFS arrival and departure times are stored as:
-
-`VARCHAR(8)`
-
-in the staging layer.
-
-The transformation layer will later convert these values into analytical date/time representations while preserving the correct service-day relationship.
-
-This design prevents loss or corruption of overnight service information.
-
-## 13. Surrogate Keys
-
-Final warehouse dimensions will use surrogate integer keys.
-
-Examples:
-
-- RouteKey
-- StopKey
-- TripKey
-- OperatorKey
-- TransportModeKey
-
-The original GTFS identifiers will also be retained as business keys.
-
-This provides:
-
-- stable dimensional relationships
-- better Power BI model performance
-- independence from source identifier formats
-- support for future source integration
-
-## 14. Star Schema Concept
-
-The intended model is conceptually:
-
 ```text
-                    DimDate
-                       |
-                       |
-DimRoute ---- FactTripStop ---- DimStop
-                       |
-                       |
-                    DimTrip
-                       |
-                DimOperator
-                       |
-              DimTransportMode
+TripInstance A
+StopSequence 1 -> Köln Hbf
+StopSequence 2 -> Düsseldorf Hbf
+StopSequence 3 -> Essen Hbf
 ```
 
-The final implementation may adjust relationships where required, but the goal is to maintain a simple analytical model suitable for Power BI.
+produces three fact rows.
 
-## 15. Future Actual Performance Data
+This grain was validated before the warehouse load in:
 
-The first warehouse version is based primarily on scheduled GTFS data.
+```text
+wrk.Phase1TripStops
+```
 
-Future realtime or historical operational data will extend the Fact table with fields such as:
+and again after loading:
 
-- actual arrival
-- actual departure
-- delay seconds
-- cancellation status
+```text
+dw.FactTripStop
+```
 
-This will enable metrics such as:
+No duplicate combinations of:
 
-- punctuality percentage
-- average delay
-- severe-delay percentage
-- cancellation rate
-- reliability score
-- delay propagation
+```text
+TripInstanceKey + StopSequence
+```
 
-## 16. Design Principle
+were found.
 
-Business logic should be centralized in the SQL transformation and warehouse layers whenever practical.
+---
 
-Power BI should primarily perform:
+## 4. Why Trip-Stop Grain Was Selected
 
-- analytical measures
-- visualization
-- filtering
-- business-facing reporting
+The Trip-Stop level provides enough detail for:
 
-rather than reconstructing complex source transformations inside Power Query or DAX.
+- route activity analysis
+- stop and station activity
+- timetable coverage
+- service frequency analysis
+- time-of-day analysis
+- after-midnight service analysis
+- future scheduled-vs-actual comparison
 
-This separation improves maintainability, transparency, and reproducibility.
+A higher-level Trip grain would lose stop-level detail.
+
+A more detailed source-level multimodal grain would create unnecessary volume for Phase 1.
+
+The selected grain therefore balances analytical usefulness with manageable warehouse size.
+
+---
+
+## 5. Fact Table
+
+### `dw.FactTripStop`
+
+### Status: Implemented
+
+Current row count:
+
+```text
+8,029,550
+```
+
+Columns:
+
+| Column | Purpose |
+|---|---|
+| `FactTripStopKey` | Surrogate row identifier |
+| `DateKey` | Link to `dw.DimDate` |
+| `RouteKey` | Link to `dw.DimRoute` |
+| `StopKey` | Link to `dw.DimStop` |
+| `TripInstanceKey` | Identifies one concrete scheduled trip instance |
+| `StopSequence` | Ordered stop position within the trip |
+| `ScheduledArrivalDateTime` | Normalized scheduled arrival timestamp |
+| `ScheduledDepartureDateTime` | Normalized scheduled departure timestamp |
+| `ArrivalDayOffset` | Number of days beyond the GTFS service date |
+| `DepartureDayOffset` | Number of days beyond the GTFS service date |
+
+The table uses:
+
+```text
+FactTripStopKey BIGINT IDENTITY
+```
+
+as its clustered primary key.
+
+---
+
+## 6. Degenerate Trip Identifier
+
+### Status: Implemented
+
+`TripInstanceKey` is stored directly in the fact table.
+
+There is currently no separate `DimTrip` dimension.
+
+This is intentional for the current Phase 1 model because the current reporting requirements primarily analyze:
+
+- dates
+- routes
+- operators
+- stops
+- stations
+- timetable events
+
+`TripInstanceKey` therefore acts as a degenerate analytical identifier that allows stop rows belonging to the same scheduled trip to be grouped together.
+
+A dedicated Trip dimension may be introduced later if trip-level descriptive attributes become important.
+
+### Future Trip Dimension
+
+Status:
+
+```text
+Planned only if required by future analytical needs
+```
+
+---
+
+## 7. Date Dimension
+
+### `dw.DimDate`
+
+### Status: Implemented
+
+Grain:
+
+```text
+One row = one calendar date
+```
+
+Current range:
+
+```text
+2026-07-01 to 2026-12-12
+```
+
+Current row count:
+
+```text
+165
+```
+
+Implemented attributes:
+
+- `DateKey`
+- `FullDate`
+- `DayNumber`
+- `DayName`
+- `DayOfWeek`
+- `WeekNumber`
+- `MonthNumber`
+- `MonthName`
+- `QuarterNumber`
+- `YearNumber`
+- `IsWeekend`
+
+`DateKey` uses the warehouse-friendly integer format:
+
+```text
+YYYYMMDD
+```
+
+Example:
+
+```text
+2026-07-01 -> 20260701
+```
+
+This makes the key:
+
+- compact
+- human-readable
+- efficient for joins
+
+---
+
+## 8. Route Dimension
+
+### `dw.DimRoute`
+
+### Status: Implemented
+
+Grain:
+
+```text
+One row = one Phase 1 RouteId
+```
+
+Current row count:
+
+```text
+65
+```
+
+Implemented attributes:
+
+- `RouteKey`
+- `RouteId`
+- `RouteShortName`
+- `RouteLongName`
+- `TransportMode`
+- `AgencyId`
+- `OperatorName`
+- `SourceRouteType`
+
+Transport modes currently included:
+
+```text
+RE
+RB
+S-Bahn
+```
+
+The distribution is:
+
+| Mode | Routes |
+|---|---:|
+| RE | 32 |
+| RB | 20 |
+| S-Bahn | 13 |
+| **Total** | **65** |
+
+No missing `OperatorName` values were found.
+
+---
+
+## 9. Route Surrogate Key
+
+The source GTFS identifier:
+
+```text
+RouteId
+```
+
+is retained in the dimension as the business key.
+
+The warehouse uses:
+
+```text
+RouteKey INT IDENTITY
+```
+
+as the surrogate key.
+
+The fact table stores only `RouteKey`.
+
+This avoids repeating potentially long text identifiers across more than eight million fact rows.
+
+---
+
+## 10. Stop Dimension
+
+### `dw.DimStop`
+
+### Status: Implemented
+
+Grain:
+
+```text
+One row = one StopId used by the Phase 1 dataset
+```
+
+Current row count:
+
+```text
+1,236
+```
+
+Implemented attributes:
+
+- `StopKey`
+- `StopId`
+- `StopName`
+- `ParentStationId`
+- `ParentStationName`
+- `PlatformCode`
+- `Latitude`
+- `Longitude`
+- `LocationType`
+- `WheelchairBoarding`
+
+Validation results:
+
+```text
+StopsWithParentStation  = 918
+MissingStopNameCount    = 0
+MissingCoordinatesCount = 0
+```
+
+---
+
+## 11. Parent Station Modeling
+
+GTFS can contain multiple platform-level StopIds for the same physical station.
+
+Example:
+
+```text
+Platform Stop A
+Platform Stop B
+Platform Stop C
+        |
+        v
+     Köln Hbf
+```
+
+For this reason, both:
+
+```text
+StopName
+ParentStationName
+```
+
+are stored.
+
+This allows analysis at:
+
+- platform / stop level
+- physical station level
+
+The analytical view uses:
+
+```text
+COALESCE(ParentStationName, StopName)
+```
+
+when a station-level aggregation is required.
+
+---
+
+## 12. Stop Surrogate Key
+
+The source business identifier:
+
+```text
+StopId
+```
+
+is preserved in the dimension.
+
+The fact table references:
+
+```text
+StopKey INT IDENTITY
+```
+
+instead.
+
+This significantly reduces repeated storage of long GTFS StopId values in the fact table.
+
+---
+
+## 13. Date Surrogate / Business Key Design
+
+Unlike Route and Stop dimensions, `DimDate` does not use an identity-based surrogate key.
+
+Instead:
+
+```text
+DateKey = YYYYMMDD
+```
+
+is used.
+
+This is a common warehouse design because dates are stable and naturally map to a compact integer representation.
+
+Example:
+
+```text
+2026-08-21 -> 20260821
+```
+
+---
+
+## 14. Dimension Key Resolution
+
+### Status: Implemented
+
+The fact table was loaded from:
+
+```text
+wrk.vPhase1TripStopsNormalized
+```
+
+by resolving business identifiers to dimension keys.
+
+Mappings:
+
+```text
+ServiceDate -> DimDate.DateKey
+RouteId     -> DimRoute.RouteKey
+StopId      -> DimStop.StopKey
+```
+
+All joins used `INNER JOIN`.
+
+Validation showed:
+
+```text
+wrk.Phase1TripStops = 8,029,550
+dw.FactTripStop     = 8,029,550
+```
+
+Therefore, no Phase 1 rows were lost during dimension key resolution.
+
+---
+
+## 15. GTFS Time Design
+
+### Status: Implemented
+
+GTFS allows times beyond midnight, such as:
+
+```text
+24:00:00
+25:15:00
+26:30:00
+```
+
+For this reason, the raw GTFS time string is not directly stored as SQL `TIME`.
+
+Instead, the transformation layer creates:
+
+```text
+ScheduledArrivalDateTime
+ScheduledDepartureDateTime
+ArrivalDayOffset
+DepartureDayOffset
+```
+
+Example:
+
+```text
+ServiceDate      = 2026-07-01
+GTFS Time        = 24:00:00
+
+Result:
+2026-07-02 00:00:00
+DayOffset = 1
+```
+
+The warehouse therefore receives analytical timestamps that preserve GTFS service-day semantics.
+
+Observed after-midnight stop events:
+
+```text
+139,241
+```
+
+---
+
+## 16. Fact Table Loading Strategy
+
+### Status: Implemented
+
+The fact table was loaded before adding reporting indexes.
+
+This was intentional.
+
+Creating all indexes before inserting more than eight million rows would force SQL Server to maintain those index structures during every insert.
+
+The implemented order was:
+
+```text
+Create Fact Table
+       |
+       v
+Load Fact Data
+       |
+       v
+Validate Row Count
+       |
+       v
+Validate Grain
+       |
+       v
+Create Analytical Indexes
+```
+
+This is more efficient for bulk warehouse loading.
+
+---
+
+## 17. Fact Table Indexing
+
+### Status: Implemented
+
+Two nonclustered analytical indexes were created.
+
+### Date / Route / Stop Index
+
+```text
+IX_FactTripStop_DateRouteStop
+(DateKey, RouteKey, StopKey)
+```
+
+Purpose:
+
+- date analysis
+- route analysis
+- stop analysis
+- grouped reporting
+- Power BI filtering patterns
+
+### Trip Instance Index
+
+```text
+IX_FactTripStop_TripInstance
+(TripInstanceKey, StopSequence)
+```
+
+Purpose:
+
+- retrieve all stops of one trip
+- preserve scheduled stop order
+- analyze one trip instance efficiently
+
+---
+
+## 18. Foreign Key Constraints
+
+### Status: Planned
+
+Logical relationships exist:
+
+```text
+FactTripStop.DateKey
+    -> DimDate.DateKey
+
+FactTripStop.RouteKey
+    -> DimRoute.RouteKey
+
+FactTripStop.StopKey
+    -> DimStop.StopKey
+```
+
+Physical foreign key constraints have not yet been created.
+
+This is therefore documented as Planned, not Implemented.
+
+If added later, they should be created only after validating the existing fact rows.
+
+---
+
+## 19. Analytical View
+
+### `dw.vTripStopAnalytics`
+
+### Status: Implemented
+
+The warehouse also exposes a business-friendly analytical view.
+
+It joins:
+
+```text
+FactTripStop
+   +
+DimDate
+   +
+DimRoute
+   +
+DimStop
+```
+
+The view exposes readable fields such as:
+
+- service date
+- route
+- mode
+- operator
+- stop
+- parent station
+- coordinates
+- scheduled arrival
+- scheduled departure
+
+It does not copy data.
+
+It only provides a reusable relational join layer.
+
+---
+
+## 20. Initial Warehouse Findings
+
+### Status: Implemented SQL validation only
+
+Initial SQL queries returned the following scheduled stop-event volumes:
+
+| Mode | Scheduled Stop Count |
+|---|---:|
+| S-Bahn | 3,748,784 |
+| RE | 2,536,487 |
+| RB | 1,744,279 |
+
+Examples of high-volume routes observed:
+
+```text
+S1  = 611,744
+S11 = 593,650
+S6  = 507,587
+```
+
+Examples of high-volume stations observed:
+
+```text
+Düsseldorf Hbf      = 162,531
+Dortmund Hbf        = 139,004
+Essen Hauptbahnhof  = 137,343
+Köln Hbf            = 85,188
+```
+
+These values represent:
+
+```text
+Scheduled Trip-Stop events
+```
+
+They do not represent:
+
+- passenger counts
+- unique train counts
+- punctuality
+- delays
+- cancellations
+
+---
+
+## 21. Current Warehouse Scope
+
+### Implemented
+
+The current warehouse supports scheduled timetable analysis for:
+
+```text
+RE
+RB
+S-Bahn
+```
+
+### Not yet implemented
+
+The warehouse does not currently include:
+
+```text
+Bus
+Tram
+Metro / U-Bahn
+ICE / IC
+Actual arrival/departure events
+Delay metrics
+Cancellation metrics
+Passenger counts
+```
+
+The complete multimodal GTFS source remains preserved in the staging layer for possible future extensions.
+
+---
+
+## 22. Current Data Warehouse Status
+
+The implemented warehouse contains:
+
+```text
+dw.DimDate        -> 165 rows
+dw.DimRoute       -> 65 rows
+dw.DimStop        -> 1,236 rows
+dw.FactTripStop   -> 8,029,550 rows
+```
+
+Together they form the first implemented Star Schema of the project.
+
+The model is now suitable for scheduled-data reporting and future Power BI integration.
+
+Operational railway performance analysis will require an additional reliable actual/realtime data source.
