@@ -2,24 +2,24 @@
 
 ## پروژه NRW Rail Performance Analytics
 
-این سند روند اتصال پروژه تحلیل عملکرد حمل‌ونقل ریلی NRW به API رسمی Deutsche Bahn را توضیح می‌دهد؛ از ساخت Application در سایت DB تا دریافت داده، خواندن XML، استخراج اطلاعات و Match کردن زمان برنامه‌ریزی‌شده با زمان تغییرکرده.
+این سند روند اتصال پروژه **NRW Rail Performance Analytics** به API رسمی Deutsche Bahn را توضیح می‌دهد؛ از ساخت Application در DB API Marketplace تا دریافت داده، Parse کردن XML، شناسایی فیلدهای مهم و Match کردن داده Planned و Changed برای محاسبه Delay.
 
-هدف این بخش این بود که Data Warehouse فعلی که بر اساس **Soll-Fahrplandaten / Scheduled Data** ساخته شده است، در آینده بتواند اطلاعات واقعی عملیاتی را نیز دریافت کند و شاخص‌هایی مانند موارد زیر را محاسبه کند:
+هدف این بخش، اضافه کردن یک منبع عملیاتی واقعی به Data Warehouse فعلی بود تا در آینده بتوان شاخص‌هایی مانند موارد زیر را محاسبه کرد:
 
 - تأخیر ورود
 - تأخیر خروج
 - تغییر سکو
 - لغو قطار
 - Punctuality
-- مقایسه Scheduled و Actual
+- Scheduled vs. Changed Performance
 
 ---
 
-# 1. مسئله چه بود؟
+# 1. مسئله اصلی
 
-در فاز اول پروژه، Data Warehouse با داده GTFS مربوط به NRW ساخته شد.
+فاز اول پروژه بر اساس داده‌های GTFS برنامه‌ریزی‌شده NRW ساخته شد.
 
-Scope فعلی شامل:
+Scope فعلی پروژه روی این سرویس‌ها متمرکز است:
 
 ```text
 RE
@@ -27,9 +27,7 @@ RB
 S-Bahn
 ```
 
-است.
-
-از GTFS اطلاعاتی مانند این موارد داریم:
+Data Warehouse فعلی اطلاعاتی مانند موارد زیر دارد:
 
 ```text
 Service Date
@@ -40,64 +38,58 @@ Scheduled Arrival
 Scheduled Departure
 ```
 
-اما GTFS برنامه حرکت به ما نمی‌گوید:
+اما Scheduled Data به‌تنهایی نمی‌تواند پاسخ دهد:
 
 ```text
-آیا قطار واقعاً دیر رسید؟
+آیا قطار تأخیر داشت؟
 چند دقیقه تأخیر داشت؟
 آیا سکو تغییر کرد؟
-آیا قطار لغو شد؟
-کدام خط بیشترین تأخیر را دارد؟
-کدام ایستگاه عملکرد ضعیف‌تری دارد؟
+آیا سرویس لغو شد؟
+کدام Route عملکرد ضعیف‌تری دارد؟
+کدام Station بیشتر تحت تأثیر تأخیر قرار می‌گیرد؟
 ```
 
-برای پاسخ دادن به این سؤال‌ها به یک منبع **Actual / Changed operational data** نیاز داشتیم.
+بنابراین به یک منبع عملیاتی واقعی نیاز داشتیم.
 
-برای Proof of Concept، API رسمی Deutsche Bahn یعنی:
+برای Proof of Concept، API رسمی Deutsche Bahn انتخاب شد:
 
 ```text
 DB Timetables API
 ```
 
-انتخاب شد.
-
 ---
 
 # 2. چرا DB Timetables API؟
 
-دو بخش این API برای پروژه ما بسیار مهم هستند.
+دو Endpoint اصلی برای این پروژه اهمیت دارند.
 
-اول:
+Planned timetable:
 
 ```text
 /plan
 ```
 
-که اطلاعات برنامه‌ریزی‌شده یا Planned/Soll را ارائه می‌کند.
-
-دوم:
+Changed timetable:
 
 ```text
 /fchg
 ```
 
-که تغییرات جاری نسبت به برنامه را ارائه می‌کند.
-
-بنابراین می‌توانیم:
+در نتیجه می‌توانیم:
 
 ```text
 Planned Data
     +
 Changed Data
     ↓
-Compare
+Match
     ↓
-Delay
+Delay Calculation
 ```
 
 داشته باشیم.
 
-مثلاً:
+مثال:
 
 ```text
 Planned Arrival = 11:15
@@ -105,55 +97,51 @@ Changed Arrival = 11:23
 Delay           = 8 minutes
 ```
 
-این دقیقاً پایه‌ای است که برای Performance Analytics نیاز داریم.
+این دقیقاً پایه مورد نیاز برای Railway Performance Analytics است.
 
 ---
 
 # 3. ساخت Application در DB API Marketplace
 
-ابتدا در سایت DB API Marketplace ثبت‌نام کردیم.
+ابتدا در DB API Marketplace ثبت‌نام شد.
 
-سپس یک Application ایجاد شد.
-
-نام مناسب برای Application می‌تواند مثلاً این باشد:
+سپس یک Application با نامی مشابه زیر ساخته شد:
 
 ```text
 NRW Rail Performance Analytics
 ```
 
-بعد Application به محصول:
+Application به محصول زیر Subscribe شد:
 
 ```text
 Timetables API
 ```
 
-متصل / Subscribe شد.
-
-برای استفاده از API دو Credential در اختیار ما قرار گرفت:
+برای Authentication دو Credential دریافت شد:
 
 ```text
 DB-Client-ID
 DB-Api-Key
 ```
 
-## نکته امنیتی بسیار مهم
+## نکته امنیتی
 
 این مقادیر نباید:
 
-- داخل Git قرار بگیرند
-- داخل README نوشته شوند
+- در Git Commit شوند
+- داخل README قرار بگیرند
 - در Screenshot دیده شوند
-- داخل SQL Script قرار بگیرند
+- در SQL Script ذخیره شوند
 - داخل Source Code عمومی Hard-code شوند
 
-برای Proof of Concept آنها را فقط به‌صورت Variable داخل PowerShell نگه داشتیم:
+برای Proof of Concept فقط در Variableهای PowerShell نگهداری شدند:
 
 ```powershell
 $clientId = "YOUR_CLIENT_ID"
 $apiKey   = "YOUR_API_KEY"
 ```
 
-سپس Header مربوط به Authentication ساخته شد:
+سپس Header درخواست ساخته شد:
 
 ```powershell
 $headers = @{
@@ -162,38 +150,36 @@ $headers = @{
 }
 ```
 
-از همین `$headers` در درخواست‌های بعدی استفاده کردیم.
-
 ---
 
-# 4. چرا از PowerShell استفاده کردیم؟
+# 4. چرا PowerShell؟
 
-در این مرحله هدف ما هنوز ساخت Application نهایی برای Data Ingestion نبود.
+در این مرحله هدف ساخت Pipeline نهایی نبود.
 
-ابتدا می‌خواستیم API واقعی را بشناسیم.
+ابتدا لازم بود Source واقعی را بررسی کنیم.
 
-PowerShell برای این کار بسیار مناسب بود چون بدون ساخت Project جدید توانستیم:
+PowerShell برای این کار مناسب بود چون امکان می‌داد:
 
 - HTTP Request ارسال کنیم
 - Authentication انجام دهیم
-- پاسخ Raw API را ببینیم
+- Raw Response را ببینیم
 - XML را Parse کنیم
-- فیلدهای API را بررسی کنیم
-- Identifierها را شناسایی کنیم
+- ساختار داده را بررسی کنیم
+- Identifierها را پیدا کنیم
 - Plan و Change را Match کنیم
-- Delay را آزمایش کنیم
+- Delay را محاسبه کنیم
 
-اصل مهم این مرحله این بود:
+اصل مهم این مرحله:
 
-> ابتدا داده واقعی Source را بررسی کن، سپس Tableهای Data Warehouse را طراحی کن.
+> ابتدا Source واقعی را بررسی کن، سپس Schema دیتابیس را طراحی کن.
 
-اگر قبل از دیدن پاسخ واقعی API جدول Actual Data را طراحی می‌کردیم، احتمال زیادی داشت Structure را بر اساس حدس بسازیم.
+این کار ریسک طراحی جدول‌های اشتباه بر اساس حدس را کاهش می‌دهد.
 
 ---
 
 # 5. پیدا کردن EVA Number ایستگاه Köln Hbf
 
-DB برای شناسایی ایستگاه‌ها از یک Identifier به نام:
+DB برای Stationها از شناسه‌ای به نام:
 
 ```text
 EVA Number
@@ -201,15 +187,13 @@ EVA Number
 
 استفاده می‌کند.
 
-ما برای Proof of Concept ایستگاه زیر را انتخاب کردیم:
+ایستگاه انتخاب‌شده برای Proof of Concept:
 
 ```text
 Köln Hbf
 ```
 
-ابتدا نام ایستگاه را به API دادیم تا EVA Number رسمی آن را پیدا کنیم.
-
-در PowerShell:
+ابتدا با Endpoint مربوط به Station، EVA را پیدا کردیم.
 
 ```powershell
 $response = Invoke-WebRequest `
@@ -217,54 +201,41 @@ $response = Invoke-WebRequest `
   -Headers $headers
 ```
 
-بعد پاسخ را دیدیم:
+بعد Response:
 
 ```powershell
 $response.Content
 ```
 
-API چیزی شبیه این برگرداند:
+خروجی XML شامل این مقدار بود:
 
 ```xml
 <station
     name="Köln Hbf"
     eva="8000207"
-    ...
 />
 ```
 
-پس:
+بنابراین:
 
 ```text
 Station = Köln Hbf
 EVA     = 8000207
 ```
 
-این عدد در درخواست‌های بعدی استفاده شد.
-
 ---
 
-# 6. هشدار اولیه PowerShell
+# 6. استفاده از UseBasicParsing
 
-اولین بار هنگام استفاده از:
+در اولین Request، Windows PowerShell یک Security Warning مربوط به Parsing نمایش داد.
 
-```powershell
-Invoke-WebRequest
-```
-
-Windows PowerShell یک Security Warning نشان داد.
-
-علت آن Parsing محتوای Web Page بود.
-
-در درخواست‌های بعدی از:
+برای Requestهای بعدی از این گزینه استفاده شد:
 
 ```powershell
 -UseBasicParsing
 ```
 
-استفاده کردیم.
-
-مثلاً:
+مثال:
 
 ```powershell
 Invoke-WebRequest `
@@ -272,23 +243,17 @@ Invoke-WebRequest `
     ...
 ```
 
-در نتیجه دیگر Parsing غیرضروری صفحه انجام نمی‌شود.
-
 ---
 
 # 7. دریافت Planned Timetable
 
-بعد از پیدا کردن EVA، هدف این بود که برنامه حرکت قطارهای Köln Hbf را بگیریم.
-
-EVA را داخل Variable قرار دادیم:
+EVA در Variable قرار گرفت:
 
 ```powershell
 $eva = "8000207"
 ```
 
-Endpoint مربوط به Plan علاوه بر EVA، تاریخ و ساعت نیز لازم دارد.
-
-برای Proof of Concept:
+برای Endpoint مربوط به Plan، تاریخ و ساعت لازم است.
 
 ```powershell
 $date = "260822"
@@ -301,9 +266,7 @@ $hour = "11"
 yyMMdd
 ```
 
-است.
-
-پس:
+بنابراین:
 
 ```text
 260822
@@ -315,14 +278,6 @@ yyMMdd
 22.08.2026
 ```
 
-و:
-
-```text
-11
-```
-
-یعنی بازه ساعت 11.
-
 Request:
 
 ```powershell
@@ -332,13 +287,13 @@ $planResponse = Invoke-WebRequest `
   -Headers $headers
 ```
 
-بعد Raw Response را دیدیم:
+نمایش Raw Response:
 
 ```powershell
 $planResponse.Content
 ```
 
-پاسخ بسیار بزرگ بود و شامل انواع سرویس‌ها بود:
+Response شامل تعداد زیادی Train Movement بود، از جمله:
 
 ```text
 S-Bahn
@@ -346,22 +301,19 @@ RE
 RB
 ICE
 FLX
-...
 ```
-
-این نتیجه ثابت کرد endpoint `/plan` به‌درستی کار می‌کند.
 
 ---
 
-# 8. تبدیل پاسخ Plan به XML Object
+# 8. Parse کردن XML
 
-چون پاسخ API XML بود، به‌جای خواندن صدها خط متن آن را Parse کردیم:
+برای کار راحت‌تر، Response به XML Object تبدیل شد:
 
 ```powershell
 [xml]$planXml = $planResponse.Content
 ```
 
-بعد فقط سه رکورد اول را مشاهده کردیم:
+برای مشاهده فقط سه رکورد:
 
 ```powershell
 $planXml.timetable.s |
@@ -369,9 +321,7 @@ $planXml.timetable.s |
     Format-List *
 ```
 
-به این ترتیب Structure داده بسیار قابل فهم‌تر شد.
-
-یک Structure ساده‌شده شبیه این است:
+ساختار ساده‌شده یک Record:
 
 ```xml
 <s id="...">
@@ -398,33 +348,25 @@ $planXml.timetable.s |
 
 ---
 
-# 9. معنی فیلدهای مهم Plan
+# 9. فیلدهای مهم Planned Data
 
-## `s.id`
+## s.id
 
-یکی از مهم‌ترین Fieldهای کل API است.
+شناسه Event یا Timetable Stop است.
 
-مثلاً:
+مثال:
 
 ```text
 2958834342628665585-2608220720-5
 ```
 
-این ID بعداً برای Match کردن Plan و Change استفاده شد.
-
-یعنی:
-
-```text
-Plan.ID = Change.ID
-```
+این ID برای Match کردن Planned و Changed Data اهمیت زیادی دارد.
 
 ---
 
-## `tl`
+## tl
 
 اطلاعات Train را نگه می‌دارد.
-
-مثلاً:
 
 ```xml
 <tl c="S" n="32170" />
@@ -437,21 +379,11 @@ c = Train Category
 n = Train Number
 ```
 
-مثلاً:
-
-```text
-c = S
-```
-
-نشان‌دهنده S-Bahn است.
-
 ---
 
-## `ar`
+## ar
 
-مربوط به Arrival است.
-
-مثلاً:
+اطلاعات Arrival:
 
 ```xml
 <ar
@@ -461,7 +393,7 @@ c = S
 />
 ```
 
-مهم‌ترین Attributeها:
+فیلدهای مهم:
 
 ```text
 pt = Planned Time
@@ -470,22 +402,18 @@ pp = Planned Platform
 
 ---
 
-## `dp`
+## dp
 
-اطلاعات Departure را نگه می‌دارد.
-
-مانند Arrival می‌تواند دارای:
+اطلاعات Departure:
 
 ```text
 pt = Planned Departure Time
-pp = Planned Platform
+pp = Planned Departure Platform
 ```
-
-باشد.
 
 ---
 
-## `l`
+## l
 
 Line را مشخص می‌کند.
 
@@ -497,27 +425,23 @@ RE7
 RB25
 ```
 
-این Field برای پروژه ما مهم است چون Data Warehouse فعلی نیز روی RE/RB/S-Bahn تمرکز دارد.
-
 ---
 
-## `ppth`
+## ppth
 
-Planned Path است.
-
-یعنی لیستی از Stationهایی که طبق برنامه قبل یا بعد از این Station در مسیر قرار دارند.
+مسیر برنامه‌ریزی‌شده قطار را به‌صورت Station Path نشان می‌دهد.
 
 ---
 
 # 10. دریافت Changed Data
 
-بعد از اطمینان از Plan، مرحله بعد گرفتن تغییرات واقعی بود.
-
-Endpoint:
+برای دریافت تغییرات عملیاتی از:
 
 ```text
 /fchg/{EVA}
 ```
+
+استفاده شد.
 
 برای Köln Hbf:
 
@@ -525,7 +449,7 @@ Endpoint:
 /fchg/8000207
 ```
 
-در PowerShell:
+PowerShell:
 
 ```powershell
 $changeResponse = Invoke-WebRequest `
@@ -534,13 +458,13 @@ $changeResponse = Invoke-WebRequest `
   -Headers $headers
 ```
 
-بعد XML را Parse کردیم:
+سپس:
 
 ```powershell
 [xml]$changeXml = $changeResponse.Content
 ```
 
-برای مشاهده چند رکورد:
+و:
 
 ```powershell
 $changeXml.timetable.s |
@@ -550,9 +474,9 @@ $changeXml.timetable.s |
 
 ---
 
-# 11. فیلد Changed Time
+# 11. Changed Time
 
-در یکی از رکوردها دیدیم:
+در یکی از Recordها این مقدار مشاهده شد:
 
 ```xml
 <ar ct="2608221123" />
@@ -561,10 +485,8 @@ $changeXml.timetable.s |
 اینجا:
 
 ```text
-ct
+ct = Changed Time
 ```
-
-یعنی Changed Time.
 
 مقدار:
 
@@ -572,26 +494,22 @@ ct
 2608221123
 ```
 
-برابر است با:
+یعنی:
 
 ```text
 22.08.2026 11:23
 ```
 
-بنابراین تفاوت اصلی:
+پس:
 
 ```text
 pt = Planned Time
 ct = Changed Time
 ```
 
-است.
-
 ---
 
-# 12. پیدا کردن یک رکورد دارای Changed Arrival
-
-برای پیدا کردن اولین رکوردی که Changed Arrival دارد، نوشتیم:
+# 12. پیدا کردن اولین Record دارای Changed Arrival
 
 ```powershell
 $changed = $changeXml.timetable.s |
@@ -599,45 +517,41 @@ $changed = $changeXml.timetable.s |
     Select-Object -First 1
 ```
 
-ID آن را دیدیم:
+نمایش ID:
 
 ```powershell
 $changed.id
 ```
 
-و XML Arrival آن را:
+نمایش Arrival XML:
 
 ```powershell
 $changed.ar.OuterXml
 ```
 
-نتیجه:
+خروجی:
 
 ```xml
 <ar ct="2608221123" />
 ```
 
-ID این رکورد:
+ID:
 
 ```text
 2958834342628665585-2608220720-5
 ```
 
-بود.
-
 ---
 
-# 13. Match کردن Plan و Change
+# 13. Match کردن Planned و Changed
 
-این مهم‌ترین قسمت Proof of Concept بود.
-
-ابتدا ID مربوط به Changed Data را ذخیره کردیم:
+ID مربوط به Changed Record ذخیره شد:
 
 ```powershell
 $id = $changed.id
 ```
 
-بعد در `planXml` دنبال همان ID گشتیم:
+سپس همان ID در Plan جست‌وجو شد:
 
 ```powershell
 $planned = $planXml.timetable.s |
@@ -645,103 +559,93 @@ $planned = $planXml.timetable.s |
     Select-Object -First 1
 ```
 
-بعد بررسی کردیم:
+برای Validation:
 
 ```powershell
 $planned.id
 ```
 
-و Plan Arrival را نمایش دادیم:
+Planned Arrival:
 
 ```powershell
 $planned.ar.OuterXml
 ```
 
-همچنین Change Arrival:
+Changed Arrival:
 
 ```powershell
 $changed.ar.OuterXml
 ```
 
-نتیجه Plan چیزی شبیه این بود:
+نتیجه Planned:
 
 ```xml
 <ar
     pt="2608221115"
     pp="4"
     fb="EUR 9411"
-    ...
 />
 ```
 
-و Change:
+نتیجه Changed:
 
 ```xml
 <ar ct="2608221123" />
 ```
 
-در نتیجه:
+بنابراین:
 
 ```text
 Planned Arrival = 11:15
 Changed Arrival = 11:23
 ```
 
-پس:
+Delay:
 
 ```text
-Arrival Delay = 8 minutes
+8 minutes
 ```
 
-این اولین بار بود که در پروژه با داده واقعی DB، Delay را از روی Planned و Changed Data اثبات کردیم.
+این اولین Validation واقعی Planned vs. Changed در پروژه بود.
 
 ---
 
-# 14. منطق اصلی Match
-
-منطق اصلی به شکل زیر است:
+# 14. منطق Match
 
 ```text
-DB /plan
+/plan
    │
-   │ ID
+   │ id
    ▼
 Match
    ▲
-   │ ID
+   │ id
    │
-DB /fchg
+/fchg
 ```
 
-یعنی:
+از نظر منطقی:
 
 ```text
 plannedStop.id = changedStop.id
 ```
 
-سپس:
+و:
 
 ```text
-ArrivalDelay =
-ChangedArrival
+Arrival Delay =
+Changed Arrival
 -
-PlannedArrival
+Planned Arrival
 ```
 
-و در آینده:
-
-```text
-DepartureDelay =
-ChangedDeparture
--
-PlannedDeparture
-```
+برای Departure نیز همین منطق قابل استفاده است.
 
 ---
 
 # 15. تبدیل Timestamp به DateTime
 
-DB Timestamp را به صورت Compact برمی‌گرداند.
+Timestampهای DB به فرم Compact هستند.
 
 مثلاً:
 
@@ -749,15 +653,13 @@ DB Timestamp را به صورت Compact برمی‌گرداند.
 2608221115
 ```
 
-فرمت آن:
+فرمت:
 
 ```text
 yyMMddHHmm
 ```
 
-است.
-
-در PowerShell می‌توانیم آن را تبدیل کنیم:
+در PowerShell:
 
 ```powershell
 $plannedArrival = [datetime]::ParseExact(
@@ -767,7 +669,7 @@ $plannedArrival = [datetime]::ParseExact(
 )
 ```
 
-برای Changed:
+Changed:
 
 ```powershell
 $changedArrival = [datetime]::ParseExact(
@@ -777,7 +679,7 @@ $changedArrival = [datetime]::ParseExact(
 )
 ```
 
-بعد اختلاف را محاسبه می‌کنیم:
+محاسبه Delay:
 
 ```powershell
 ($changedArrival - $plannedArrival).TotalMinutes
@@ -785,9 +687,9 @@ $changedArrival = [datetime]::ParseExact(
 
 ---
 
-# 16. اسکریپت آماده برای چند رکورد
+# 16. اسکریپت چند Record
 
-برای اینکه این کار را فقط برای یک قطار انجام ندهیم، Pattern زیر آماده شد:
+برای Generalize کردن همین منطق:
 
 ```powershell
 $results = foreach ($changedStop in $changeXml.timetable.s) {
@@ -829,7 +731,7 @@ $results = foreach ($changedStop in $changeXml.timetable.s) {
 }
 ```
 
-برای نمایش:
+نمایش:
 
 ```powershell
 $results |
@@ -845,16 +747,14 @@ $results |
     Format-List
 ```
 
-تا زمان نگارش این مستند، Match یک رکورد واقعی Plan/Change با موفقیت تأیید شده است و اسکریپت بالا گام بعدی برای Generalize کردن همین منطق روی چند Record است.
-
 ---
 
 # 17. Mapping فیلدهای API
 
-| Field | معنی |
+| API Field | معنی |
 |---|---|
-| `s.id` | شناسه Event / Timetable Stop |
-| `s.eva` | شناسه رسمی Station |
+| `s.id` | شناسه Timetable Event |
+| `s.eva` | Station EVA |
 | `tl.c` | Train Category |
 | `tl.n` | Train Number |
 | `ar.pt` | Planned Arrival |
@@ -862,24 +762,22 @@ $results |
 | `ar.pp` | Planned Arrival Platform |
 | `ar.cp` | Changed Arrival Platform |
 | `ar.l` | Line |
-| `ar.fb` | Train/Service Designation |
+| `ar.fb` | Train / Service Designation |
 | `dp.pt` | Planned Departure |
 | `dp.ct` | Changed Departure |
 | `dp.pp` | Planned Departure Platform |
 | `dp.cp` | Changed Departure Platform |
-| `ppth` | Planned Path |
+| `ppth` | Planned Station Path |
 
-نکته مهم:
+همه Fieldها در همه Recordها وجود ندارند.
 
-همه Attributeها در همه رکوردها وجود ندارند.
-
-بنابراین Parser آینده باید وجود یا عدم وجود Field را بررسی کند.
+در طراحی Parser نهایی باید Optional بودن فیلدها در نظر گرفته شود.
 
 ---
 
-# 18. ارتباط این بخش با Data Warehouse فعلی
+# 18. ارتباط با Data Warehouse
 
-تا قبل از DB API معماری ما:
+معماری فعلی:
 
 ```text
 NRW GTFS
@@ -895,9 +793,7 @@ dw
    └── FactTripStop
 ```
 
-بود.
-
-با DB API یک Source جدید اضافه می‌شود:
+منبع جدید:
 
 ```text
 DB Timetables API
@@ -906,89 +802,90 @@ DB Timetables API
 /plan
 /fchg
        ↓
-PowerShell Exploration
+PowerShell Proof of Concept
        ↓
-Future API Staging
+Future Operational Staging
        ↓
-Actual / Changed Processing
+Delay / Cancellation Processing
        ↓
-Performance KPIs
+Performance Analytics
 ```
 
-مدل نهایی در آینده:
+تصویر کلی:
 
 ```text
 GTFS Scheduled Data
         +
 DB Operational Data
         ↓
-Scheduled vs Actual
+Scheduled vs. Changed
         ↓
 NRW Rail Performance Analytics
 ```
 
-خواهد بود.
-
 ---
 
-# 19. چرا این قسمت برای مصاحبه مهم است؟
+# 19. دلیل اهمیت این بخش در پروژه
 
-این بخش چند Skill مهم را همزمان نشان می‌دهد:
+این بخش Skillهای مختلفی را همزمان نشان می‌دهد:
 
-- کار با External API
-- Authentication
-- HTTP Request
+- External API Integration
+- API Authentication
 - PowerShell
+- HTTP Requests
 - XML Parsing
 - Data Discovery
-- Data Transformation
 - Identifier Matching
-- DateTime Conversion
+- DateTime Transformation
 - Business KPI Calculation
-- Data Warehouse Integration Thinking
+- Data Warehouse Design Thinking
 
-در واقع PowerShell فقط برای گرفتن داده استفاده نشد.
+PowerShell در این پروژه فقط یک ابزار Command Line نبود.
 
-از آن به عنوان یک **Exploration / Prototyping Layer** استفاده شد.
-
-یعنی قبل از اینکه Actual Tables را در SQL Server طراحی کنیم، ابتدا ساختار واقعی API را بررسی کردیم.
+از آن به‌عنوان یک **Data Exploration و API Prototyping Layer** استفاده شد.
 
 ---
 
-# 20. توضیح مناسب برای مصاحبه
+# 20. توضیح پیشنهادی در مصاحبه
 
-می‌توان این بخش را در مصاحبه این‌طور توضیح داد:
+می‌توان این قسمت را این‌طور توضیح داد:
 
-> من ابتدا Data Warehouse را با داده‌های GTFS برنامه‌ریزی‌شده NRW ساختم، اما متوجه شدم Scheduled Data به‌تنهایی برای Performance Analysis کافی نیست. بنابراین API رسمی Deutsche Bahn را بررسی کردم. قبل از طراحی جدول‌های جدید SQL، با PowerShell یک Proof of Concept ساختم. ابتدا Köln Hbf را به EVA Number تبدیل کردم، سپس با endpoint `/plan` برنامه حرکت را دریافت کردم و پاسخ XML را Parse کردم. بعد با `/fchg` تغییرات عملیاتی را گرفتم. با استفاده از ID مشترک Plan و Change، یک رکورد واقعی را Match کردم. زمان برنامه‌ریزی‌شده ورود 11:15 و Changed Time برابر 11:23 بود و در نتیجه Delay هشت دقیقه محاسبه شد. این Proof of Concept ساختار لازم برای طراحی Actual Data Pipeline را مشخص کرد.
+> در ابتدا Data Warehouse را با داده‌های GTFS برنامه‌ریزی‌شده NRW ساختم. اما Scheduled Data برای Performance Analytics کافی نبود، چون Delay و Cancellation را نشان نمی‌داد. بنابراین DB Timetables API را بررسی کردم. قبل از طراحی جدول‌های Actual، با PowerShell یک Proof of Concept ساختم. ابتدا Köln Hbf را به EVA Number تبدیل کردم، سپس با `/plan` داده Planned و با `/fchg` داده Changed را گرفتم. XML Responseها را Parse کردم و با استفاده از ID مشترک، یک Event واقعی را Match کردم. Planned Arrival آن 11:15 و Changed Arrival آن 11:23 بود و Delay هشت دقیقه محاسبه شد. این مرحله به من اجازه داد قبل از طراحی SQL Schema، ساختار واقعی Source را Validate کنم.
 
-نسخه کوتاه‌تر:
+نسخه کوتاه:
 
-> قبل از طراحی لایه Actual در Data Warehouse، از PowerShell برای Data Discovery روی DB Timetables API استفاده کردم. به این ترتیب API authentication، XML schema، identifier matching و محاسبه Planned-vs-Changed delay را روی داده واقعی Validate کردم.
+> I used PowerShell as an API exploration and prototyping layer before extending the SQL Server warehouse. I validated authentication, XML parsing, identifier matching and planned-versus-changed delay calculation on real Deutsche Bahn operational data.
 
 ---
 
-# 21. اصل مهم مهندسی این مرحله
+# 21. اصل مهندسی این مرحله
 
-مهم‌ترین درس این قسمت:
+مهم‌ترین اصل این مرحله:
 
-> **ساختار دیتابیس را بر اساس حدس در مورد Source خارجی طراحی نکن؛ ابتدا Source واقعی را ببین، Parse کن و Validation انجام بده.**
+> **External Source را بر اساس فرض طراحی نکن؛ ابتدا داده واقعی را دریافت، Parse و Validate کن.**
 
-PowerShell در این پروژه یک ابزار موقت ولی بسیار مهم بین API خارجی و Data Warehouse بود.
-
-به کمک آن قبل از توسعه Pipeline نهایی مطمئن شدیم که:
+مسیر Proof of Concept:
 
 ```text
-API قابل دسترس است
-↓
-Station قابل شناسایی است
-↓
-Plan قابل دریافت است
-↓
-Changes قابل دریافت است
-↓
-Recordها قابل Match هستند
-↓
-Delay قابل محاسبه است
+DB API Application
+        ↓
+Authentication
+        ↓
+Station Lookup
+        ↓
+EVA Number
+        ↓
+/plan
+        ↓
+Planned XML
+        ↓
+/fchg
+        ↓
+Changed XML
+        ↓
+ID Matching
+        ↓
+Delay Calculation
 ```
 
-و بنابراین مرحله بعدی می‌تواند با اطمینان بیشتری روی طراحی **Actual/Realtime ingestion layer در SQL Server** متمرکز شود.
+این Proof of Concept پایه مرحله بعدی پروژه است: طراحی یک **Operational / Actual Data Ingestion Layer** برای SQL Server و تبدیل پروژه از Schedule Analytics به Performance Analytics.
